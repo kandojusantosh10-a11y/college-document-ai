@@ -1,4 +1,4 @@
-const API_BASE_URL = 'http://localhost:8080';
+const API_BASE_URL = 'https://college-document-ai-1.onrender.com';
 const fileInput = document.querySelector('#pdf-file'), uploadButton = document.querySelector('#upload-button'), dropZone = document.querySelector('#drop-zone'), docs = document.querySelector('#documents'), form = document.querySelector('#chat-form'), question = document.querySelector('#question'), messages = document.querySelector('#messages'), sendButton = document.querySelector('#send-button');
 function toast(message, error=false){const el=document.querySelector('#toast');el.textContent=message;el.className=`show ${error?'error':''}`;setTimeout(()=>el.className='',3500)}
 async function api(path, options={}){const response=await fetch(API_BASE_URL+path,options);const data=await response.json().catch(()=>({}));if(!response.ok)throw new Error(data.message||'Something went wrong.');return data}
