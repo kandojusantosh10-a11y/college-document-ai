@@ -1,0 +1,8 @@
+.env
+*.env
+documents/*
+!documents/.gitkeep
+vectorstore/*
+!vectorstore/.gitkeep
+BackEnd/target/
+.idea/
