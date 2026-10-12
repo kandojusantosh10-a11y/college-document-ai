@@ -10,6 +10,7 @@ import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.vectorstore.SearchRequest;
 import org.springframework.ai.vectorstore.SimpleVectorStore;
+import org.springframework.ai.vectorstore.filter.FilterExpressionBuilder;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 
@@ -19,9 +20,15 @@ public class ChatService {
     private final SimpleVectorStore vectorStore; private final ChatClient chatClient; private final AppProperties properties; private final DocumentService documents;
     public ChatService(SimpleVectorStore vectorStore, ChatClient chatClient, AppProperties properties, DocumentService documents) { this.vectorStore = vectorStore; this.chatClient = chatClient; this.properties = properties; this.documents = documents; }
     public ChatResponse answer(String question) {
-        if (!documents.hasDocuments()) return new ChatResponse(NOT_FOUND, List.of());
+        Set<String> indexedFileNames = documents.indexedFileNames();
+        Set<String> indexedChunkIds = documents.indexedChunkIds();
+        if (indexedFileNames.isEmpty() || indexedChunkIds.isEmpty()) return new ChatResponse(NOT_FOUND, List.of());
         List<Document> matches;
-        try { matches = vectorStore.similaritySearch(SearchRequest.builder().query(question).topK(properties.getRagTopK()).similarityThreshold(properties.getRagSimilarityThreshold()).build()); }
+        try {
+            var fileNameFilter = new FilterExpressionBuilder().in("fileName", indexedFileNames.toArray()).build();
+            matches = vectorStore.similaritySearch(SearchRequest.builder().query(question).topK(properties.getRagTopK()).similarityThreshold(properties.getRagSimilarityThreshold()).filterExpression(fileNameFilter).build());
+            matches = filterIndexedChunks(matches, indexedChunkIds);
+        }
         catch (Exception e) { SafeAiErrorLogger.logFailure(org.slf4j.LoggerFactory.getLogger(ChatService.class), "Query embedding and vector search", e); throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "Unable to search documents. Check the Gemini API key, embedding model, and network connectivity."); }
         if (matches == null || matches.isEmpty()) return new ChatResponse(NOT_FOUND, List.of());
         String context = matches.stream().map(d -> "[Source: " + d.getMetadata().get("fileName") + ", page " + d.getMetadata().get("page") + "]\n" + d.getText()).reduce("", (a, b) -> a + "\n\n" + b);
@@ -31,9 +38,23 @@ public class ChatService {
             return new ChatResponse(answer == null || answer.isBlank() ? NOT_FOUND : answer.trim(), sources(matches));
         } catch (Exception e) { SafeAiErrorLogger.logFailure(org.slf4j.LoggerFactory.getLogger(ChatService.class), "Gemini answer generation", e); throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "Unable to generate an answer. Check the Gemini API key, chat model, and network connectivity."); }
     }
-    private List<SourceResponse> sources(List<Document> docs) {
+    List<Document> filterIndexedChunks(List<Document> docs, Set<String> indexedChunkIds) {
+        if (docs == null || indexedChunkIds == null || indexedChunkIds.isEmpty()) return List.of();
+        return docs.stream().filter(Objects::nonNull)
+                .filter(d -> d.getId() != null && indexedChunkIds.contains(d.getId()))
+                .filter(d -> d.getMetadata() != null
+                        && d.getMetadata().get("fileName") instanceof String fileName && !fileName.isBlank()
+                        && d.getMetadata().get("page") instanceof Number page && page.intValue() > 0)
+                .toList();
+    }
+    List<SourceResponse> sources(List<Document> docs) {
         Set<String> seen = new LinkedHashSet<>(); List<SourceResponse> result = new ArrayList<>();
-        for (Document d : docs) { String name = String.valueOf(d.getMetadata().get("fileName")); Integer page = ((Number) d.getMetadata().get("page")).intValue(); if (seen.add(name + page)) result.add(new SourceResponse(name, page)); }
+        for (Document d : docs) {
+            if (d == null || d.getMetadata() == null
+                    || !(d.getMetadata().get("fileName") instanceof String name) || name.isBlank()
+                    || !(d.getMetadata().get("page") instanceof Number page) || page.intValue() <= 0) continue;
+            if (seen.add(name + page.intValue())) result.add(new SourceResponse(name, page.intValue()));
+        }
         return result;
     }
 }

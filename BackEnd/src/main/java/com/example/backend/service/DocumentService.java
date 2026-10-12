@@ -61,6 +61,18 @@ public class DocumentService {
     }
     public synchronized List<DocumentResponse> list() { return index.values().stream().map(d -> new DocumentResponse(d.fileName(), "PROCESSED", d.chunks().size())).toList(); }
     public synchronized boolean hasDocuments() { return !index.isEmpty(); }
+    public synchronized Set<String> indexedFileNames() {
+        return new LinkedHashSet<>(index.keySet());
+    }
+    public synchronized Set<String> indexedChunkIds() {
+        Set<String> ids = new HashSet<>();
+        for (StoredDocument document : index.values()) {
+            if (document != null && document.chunks() != null) {
+                document.chunks().stream().filter(Objects::nonNull).forEach(ids::add);
+            }
+        }
+        return ids;
+    }
     public synchronized void delete(String fileName) {
         StoredDocument stored = index.remove(fileName);
         if (stored == null) throw new ApiException(HttpStatus.NOT_FOUND, "Document not found.");
